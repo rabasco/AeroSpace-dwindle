@@ -3,8 +3,10 @@
 
 let subcommandDescriptions = [
     ["  balance-sizes", "Balance sizes of all windows in the current workspace"],
+    ["  centered-workspace-bar", "HyprSpace's enhanced visual workspace indicator with centered bar display"],
     ["  close-all-windows-but-current", "On the focused workspace, close all windows but current"],
     ["  close", "Close the focused window"],
+    ["  config-reference", "Complete reference for all HyprSpace configuration options"],
     ["  config", "Query AeroSpace config options"],
     ["  debug-windows", "Interactive command to record Accessibility API debug information to create bug reports"],
     ["  enable", "Temporarily disable window management"],
@@ -29,6 +31,7 @@ let subcommandDescriptions = [
     ["  move-node-to-workspace", "Move the focused window to the specified workspace"],
     ["  move-workspace-to-monitor", "Move workspace to monitor targeted by relative direction, by order, or by pattern."],
     ["  move", "Move the focused window in the given direction"],
+    ["  promote-master", "Promote the focused window to be the master window"],
     ["  reload-config", "Reload currently active config"],
     ["  resize", "Resize the focused window"],
     ["  split", "Split focused window"],

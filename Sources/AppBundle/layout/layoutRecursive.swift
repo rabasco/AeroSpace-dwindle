@@ -46,6 +46,12 @@ extension TreeNode {
                         try await container.layoutTiles(point, width: width, height: height, virtual: virtual, context)
                     case .accordion:
                         try await container.layoutAccordion(point, width: width, height: height, virtual: virtual, context)
+                    case .dwindle:
+                        try await container.layoutDwindle(point, width: width, height: height, virtual: virtual, context)
+                    case .scroll:
+                        try await container.layoutScroll(point, width: width, height: height, virtual: virtual, context)
+                    case .master:
+                        try await container.layoutMaster(point, width: width, height: height, virtual: virtual, context)
                 }
             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
                  .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
@@ -54,7 +60,7 @@ extension TreeNode {
     }
 }
 
-private struct LayoutContext {
+struct LayoutContext {
     let workspace: Workspace
     let resolvedGaps: ResolvedGaps
 
@@ -63,6 +69,58 @@ private struct LayoutContext {
         self.workspace = workspace
         self.resolvedGaps = ResolvedGaps(gaps: config.gaps, monitor: workspace.workspaceMonitor)
     }
+}
+
+/// Applies aspect ratio padding to a single window in dwindle layout
+/// - Parameters:
+///   - point: Top-left corner of available rect
+///   - width: Available width
+///   - height: Available height
+///   - context: Layout context with workspace and monitor information
+/// - Returns: Adjusted (point, width, height) tuple with aspect ratio padding applied, or original if disabled
+@MainActor
+private func applyAspectRatioPadding(
+    point: CGPoint,
+    width: CGFloat,
+    height: CGFloat,
+    context: LayoutContext,
+) -> (point: CGPoint, width: CGFloat, height: CGFloat) {
+    let aspectRatio = config.dwindleSingleWindowAspectRatio
+    let tolerance = config.dwindleSingleWindowAspectRatioTolerance
+
+    // Feature disabled if y is zero
+    guard aspectRatio.y != 0 else {
+        return (point, width, height)
+    }
+
+    // Calculate requested and actual aspect ratios
+    let requestedRatio = aspectRatio.x / aspectRatio.y
+    let originalRatio = width / height
+
+    var padding = CGSize.zero
+
+    if requestedRatio > originalRatio {
+        // Monitor is taller than requested - add vertical padding
+        let vPadding = height - (width / requestedRatio)
+        // Only apply if padding exceeds tolerance threshold
+        if vPadding / 2 > tolerance * height {
+            padding.height = vPadding
+        }
+    } else if requestedRatio < originalRatio {
+        // Monitor is wider than requested - add horizontal padding
+        let hPadding = width - (height * requestedRatio)
+        // Only apply if padding exceeds tolerance threshold
+        if hPadding / 2 > tolerance * width {
+            padding.width = hPadding
+        }
+    }
+
+    // Apply padding by centering the window
+    return (
+        point: CGPoint(x: point.x + padding.width / 2, y: point.y + padding.height / 2),
+        width: width - padding.width,
+        height: height - padding.height,
+    )
 }
 
 extension Window {
@@ -87,7 +145,7 @@ extension Window {
     }
 
     @MainActor
-    fileprivate func layoutFullscreen(_ context: LayoutContext) {
+    func layoutFullscreen(_ context: LayoutContext) {
         let monitorRect = noOuterGapsInFullscreen
             ? context.workspace.workspaceMonitor.visibleRect
             : context.workspace.workspaceMonitor.visibleRectPaddedByOuterGaps
@@ -161,6 +219,240 @@ extension TilingContainer {
                         virtual: virtual,
                         context,
                     )
+            }
+        }
+    }
+
+    @MainActor
+    fileprivate func layoutDwindle(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
+        // Dwindle layout uses a persistent binary tree cache that maintains split ratios
+        // across layout recalculations, enabling window resizing.
+        guard !children.isEmpty else { return }
+
+        // Single child takes full space (with optional aspect ratio padding)
+        if children.count == 1 {
+            // Apply aspect ratio padding if configured
+            let adjusted = applyAspectRatioPadding(point: point, width: width, height: height, context: context)
+            try await children[0].layoutRecursive(
+                adjusted.point,
+                width: adjusted.width,
+                height: adjusted.height,
+                virtual: virtual,
+                context,
+            )
+            return
+        }
+
+        // Get or create the dwindle cache
+        let cache = dwindleCache
+
+        // Rebuild cache if window structure changed
+        let rect = CGRect(x: point.x, y: point.y, width: width, height: height)
+        if cache.needsRebuild(for: children) {
+            cache.rebuild(from: children, availableRect: rect)
+        }
+
+        // Layout using cache - this maintains split ratios and updates geometry
+        try await cache.layout(in: rect, context: context)
+    }
+
+    @MainActor
+    fileprivate func layoutScroll(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
+        guard !children.isEmpty else { return }
+
+        // Defensive: Ensure horizontal orientation (should be set by Layer 1)
+        if orientation != .h {
+            changeOrientation(.h)
+            print("Debug: Auto-adjusted orientation to horizontal for scroll layout")
+        }
+
+        // Special case: single window uses full width
+        if children.count == 1 {
+            try await children[0].layoutRecursive(
+                point,
+                width: width,
+                height: height,
+                virtual: virtual,
+                context,
+            )
+            return
+        }
+
+        // Carousel scroll layout (horizontal only):
+        // - Focused window: centered, configurable width (default 80%)
+        // - Peek effect: margins split equally on left/right (e.g., 10% each for 80% width)
+        // - Custom widths: preserved from previous layouts (if resized)
+
+        let focusedWidthRatio: CGFloat = config.niriFocusedWidthRatio
+        let defaultWindowWidth = width * focusedWidthRatio
+        let peekMargin = width * ((1.0 - focusedWidthRatio) / 2.0)
+
+        // Find the focused (most recent) window
+        let anchorNode = mostRecentChild ?? children[0]
+        guard let anchorIndex = children.firstIndex(where: { $0 === anchorNode }) else { return }
+
+        // Get window widths (custom if resized, otherwise default 80%)
+        let windowWidths: [CGFloat] = children.map { child in
+            if let virtualRect = child.lastAppliedLayoutVirtualRect {
+                return virtualRect.width
+            }
+            return defaultWindowWidth
+        }
+
+        // Calculate positions:
+        // Focused window is centered with peekMargin on left
+        let focusedX = point.x + peekMargin
+        var positions = Array(repeating: point.x, count: children.count)
+        positions[anchorIndex] = focusedX
+
+        // Position windows to the right of focused
+        var rightCursor = focusedX + windowWidths[anchorIndex]
+        if anchorIndex + 1 < children.count {
+            for index in (anchorIndex + 1) ..< children.count {
+                positions[index] = rightCursor
+                rightCursor += windowWidths[index]
+            }
+        }
+
+        // Position windows to the left of focused
+        var leftCursor = focusedX
+        if anchorIndex > 0 {
+            for index in stride(from: anchorIndex - 1, through: 0, by: -1) {
+                leftCursor -= windowWidths[index]
+                positions[index] = leftCursor
+            }
+        }
+
+        // Virtual positions (gapless, for logical representation)
+        var virtualPositions = Array(repeating: virtual.topLeftX, count: children.count)
+        virtualPositions[anchorIndex] = virtual.topLeftX
+
+        var virtualRightCursor = virtual.topLeftX + windowWidths[anchorIndex]
+        if anchorIndex + 1 < children.count {
+            for index in (anchorIndex + 1) ..< children.count {
+                virtualPositions[index] = virtualRightCursor
+                virtualRightCursor += windowWidths[index]
+            }
+        }
+
+        var virtualLeftCursor = virtual.topLeftX
+        if anchorIndex > 0 {
+            for index in stride(from: anchorIndex - 1, through: 0, by: -1) {
+                virtualLeftCursor -= windowWidths[index]
+                virtualPositions[index] = virtualLeftCursor
+            }
+        }
+
+        // Layout all windows
+        for (index, child) in children.enumerated() {
+            let childWidth = windowWidths[index]
+            let childPoint = CGPoint(x: positions[index], y: point.y)
+
+            try await child.layoutRecursive(
+                childPoint,
+                width: childWidth,
+                height: height,
+                virtual: Rect(
+                    topLeftX: virtualPositions[index],
+                    topLeftY: virtual.topLeftY,
+                    width: childWidth,
+                    height: virtual.height,
+                ),
+                context,
+            )
+            child.setWeight(.h, childWidth)
+        }
+    }
+
+    @MainActor
+    fileprivate func layoutMaster(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
+        guard !children.isEmpty else { return }
+
+        // Single window takes full space
+        if children.count == 1 {
+            try await children[0].layoutRecursive(point, width: width, height: height, virtual: virtual, context)
+            return
+        }
+
+        // Master layout with 2+ windows:
+        // - First child is master window (gets masterPercent of width)
+        // - Remaining children are stack windows (share remaining width, arranged vertically)
+        // - Orientation determines if master is on left or right
+
+        let cache = masterCache
+        let horizontalGap = CGFloat(context.resolvedGaps.inner.horizontal)
+        let verticalGap = CGFloat(context.resolvedGaps.inner.vertical)
+
+        // Calculate master and stack widths
+        let masterWidth = cache.getMasterWidth(totalWidth: width - horizontalGap)
+        let stackWidth = cache.getStackWidth(totalWidth: width - horizontalGap)
+
+        // Calculate master and stack positions based on orientation
+        let (masterX, stackX) = if cache.orientation == .left {
+            // Master on left, stack on right
+            (point.x, point.x + masterWidth + horizontalGap)
+        } else {
+            // Master on right, stack on left
+            (point.x + stackWidth + horizontalGap, point.x)
+        }
+
+        // Layout master window (first child)
+        let masterChild = children[0]
+        let masterPoint = CGPoint(x: masterX, y: point.y)
+        let masterVirtual = Rect(
+            topLeftX: cache.orientation == .left ? virtual.topLeftX : virtual.topLeftX + stackWidth,
+            topLeftY: virtual.topLeftY,
+            width: masterWidth,
+            height: virtual.height,
+        )
+
+        try await masterChild.layoutRecursive(
+            masterPoint,
+            width: masterWidth,
+            height: height,
+            virtual: masterVirtual,
+            context,
+        )
+
+        // Layout stack windows (remaining children) vertically
+        if children.count > 1 {
+            let stackChildren = Array(children[1...])
+            let stackChildCount = stackChildren.count
+
+            // Calculate equal height for each stack window with gaps
+            let totalVerticalGaps = verticalGap * CGFloat(stackChildCount - 1)
+            let availableHeight = height - totalVerticalGaps
+            let stackChildHeight = availableHeight / CGFloat(stackChildCount)
+
+            var currentY = point.y
+            var virtualCurrentY = virtual.topLeftY
+
+            for (i, child) in stackChildren.enumerated() {
+                let childPoint = CGPoint(x: stackX, y: currentY)
+                let childVirtual = Rect(
+                    topLeftX: cache.orientation == .left ? virtual.topLeftX + masterWidth : virtual.topLeftX,
+                    topLeftY: virtualCurrentY,
+                    width: stackWidth,
+                    height: stackChildHeight,
+                )
+
+                try await child.layoutRecursive(
+                    childPoint,
+                    width: stackWidth,
+                    height: stackChildHeight,
+                    virtual: childVirtual,
+                    context,
+                )
+
+                // Advance to next position
+                currentY += stackChildHeight
+                virtualCurrentY += stackChildHeight
+
+                // Add gap if not the last child
+                if i < stackChildCount - 1 {
+                    currentY += verticalGap
+                    virtualCurrentY += verticalGap
+                }
             }
         }
     }

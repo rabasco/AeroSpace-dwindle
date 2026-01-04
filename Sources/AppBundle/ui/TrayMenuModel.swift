@@ -1,10 +1,9 @@
 import AppKit
 import Common
 
+@MainActor
 public final class TrayMenuModel: ObservableObject {
-    @MainActor public static let shared = TrayMenuModel()
-
-    private init() {}
+    public static let shared = TrayMenuModel()
 
     @Published var trayText: String = ""
     @Published var trayItems: [TrayItem] = []
@@ -13,11 +12,137 @@ public final class TrayMenuModel: ObservableObject {
     @Published var workspaces: [WorkspaceViewModel] = []
     @Published var experimentalUISettings: ExperimentalUISettings = ExperimentalUISettings()
     @Published var sponsorshipMessage: String = sponsorshipPrompts.randomElement().orDie()
+
+    // CENTERED BAR FEATURE - Cache for window titles
+    @Published private var windowTitleCache: [UInt32: String] = [:]
+
+    // CENTERED BAR FEATURE - Reactive properties for menu bindings
+    @Published var centeredBarEnabled: Bool {
+        didSet {
+            CenteredBarSettings.shared.enabled = centeredBarEnabled
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.setupCenteredBar(viewModel: self)
+            } else {
+                CenteredBarManager.shared?.removeCenteredBar()
+            }
+        }
+    }
+
+    @Published var centeredBarShowNumbers: Bool {
+        didSet {
+            CenteredBarSettings.shared.showNumbers = centeredBarShowNumbers
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarWindowLevel: CenteredBarWindowLevel {
+        didSet {
+            CenteredBarSettings.shared.windowLevel = centeredBarWindowLevel
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarPosition: CenteredBarPosition {
+        didSet {
+            CenteredBarSettings.shared.position = centeredBarPosition
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarNotchAware: Bool {
+        didSet {
+            CenteredBarSettings.shared.notchAware = centeredBarNotchAware
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarDeduplicateIcons: Bool {
+        didSet {
+            CenteredBarSettings.shared.deduplicateAppIcons = centeredBarDeduplicateIcons
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarHideEmptyWorkspaces: Bool {
+        didSet {
+            CenteredBarSettings.shared.hideEmptyWorkspaces = centeredBarHideEmptyWorkspaces
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarShowModeIndicator: Bool {
+        didSet {
+            CenteredBarSettings.shared.showModeIndicator = centeredBarShowModeIndicator
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    private init() {
+        // Initialize centered bar properties from UserDefaults
+        self.centeredBarEnabled = CenteredBarSettings.shared.enabled
+        self.centeredBarShowNumbers = CenteredBarSettings.shared.showNumbers
+        self.centeredBarWindowLevel = CenteredBarSettings.shared.windowLevel
+        self.centeredBarPosition = CenteredBarSettings.shared.position
+        self.centeredBarNotchAware = CenteredBarSettings.shared.notchAware
+        self.centeredBarDeduplicateIcons = CenteredBarSettings.shared.deduplicateAppIcons
+        self.centeredBarHideEmptyWorkspaces = CenteredBarSettings.shared.hideEmptyWorkspaces
+        self.centeredBarShowModeIndicator = CenteredBarSettings.shared.showModeIndicator
+    }
+
+    // CENTERED BAR FEATURE - Window title cache management
+    func getCachedWindowTitle(for windowId: UInt32) -> String? {
+        return windowTitleCache[windowId]
+    }
+
+    func updateWindowTitles(for windows: [Window]) {
+        Task {
+            for window in windows {
+                do {
+                    let title = try await window.title
+                    if !title.isEmpty {
+                        await MainActor.run {
+                            if windowTitleCache[window.windowId] != title {
+                                windowTitleCache[window.windowId] = title
+                                // Trigger view update if needed
+                                objectWillChange.send()
+                            }
+                        }
+                    }
+                } catch {
+                    // If we can't get the title, continue without caching
+                    continue
+                }
+            }
+        }
+    }
+
+    func clearWindowTitleCache() {
+        windowTitleCache.removeAll()
+    }
 }
 
 @MainActor func updateTrayText() {
     let sortedMonitors = sortedMonitors
     let focus = focus
+
+    // CENTERED BAR FEATURE - Update window titles for all visible windows
+    let allVisibleWindows = Workspace.all.flatMap { $0.allLeafWindowsRecursive }
+    TrayMenuModel.shared.updateWindowTitles(for: allVisibleWindows)
+
     TrayMenuModel.shared.trayText = (activeMode?.takeIf { $0 != mainModeId }?.first.map { "[\($0.uppercased())] " } ?? "") +
         sortedMonitors
         .map {
@@ -60,6 +185,8 @@ public final class TrayMenuModel: ObservableObject {
         items.insert(mode, at: 0)
     }
     TrayMenuModel.shared.trayItems = items
+    // CENTERED BAR FEATURE
+    CenteredBarManager.shared?.update(viewModel: TrayMenuModel.shared)
 }
 
 struct WorkspaceViewModel: Hashable {

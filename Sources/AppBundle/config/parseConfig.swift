@@ -113,6 +113,12 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "auto-reload-config": Parser(\.autoReloadConfig, parseBool),
     "automatically-unhide-macos-hidden-apps": Parser(\.automaticallyUnhideMacosHiddenApps, parseBool),
     "accordion-padding": Parser(\.accordionPadding, parseInt),
+    "dwindle-single-window-aspect-ratio": Parser(\.dwindleSingleWindowAspectRatio, parseCGPoint),
+    "dwindle-single-window-aspect-ratio-tolerance": Parser(\.dwindleSingleWindowAspectRatioTolerance, parseCGFloat),
+    "dwindle-default-split-ratio": Parser(\.dwindleDefaultSplitRatio, parseCGFloat),
+    "master-default-percent": Parser(\.masterDefaultPercent, parseCGFloat),
+    "niri-focused-width-ratio": Parser(\.niriFocusedWidthRatio, parseCGFloat),
+    "mouse-sensitivity": Parser(\.mouseSensitivity, parseCGFloat),
     persistentWorkspacesKey: Parser(\.persistentWorkspaces, parsePersistentWorkspaces),
     "exec-on-workspace-change": Parser(\.execOnWorkspaceChange, parseArrayOfStrings),
     "exec": Parser(\.execConfig, parseExecConfig),
@@ -207,6 +213,46 @@ func parseCommandOrCommands(_ raw: TOMLValueConvertible) -> Parsed<[any Command]
             }
             + (config.workspaceToMonitorForceAssignment).keys)
             .toOrderedSet()
+    }
+
+    // Validate niri-focused-width-ratio
+    if config.niriFocusedWidthRatio < 0.1 || config.niriFocusedWidthRatio > 1.0 {
+        errors += [.semantic(
+            .rootKey("niri-focused-width-ratio"),
+            "niri-focused-width-ratio must be between 0.1 and 1.0 (got \(config.niriFocusedWidthRatio))",
+        )]
+        // Reset to default if invalid
+        config.niriFocusedWidthRatio = 0.8
+    }
+
+    // Validate dwindle-default-split-ratio
+    if config.dwindleDefaultSplitRatio < 0.1 || config.dwindleDefaultSplitRatio > 1.9 {
+        errors += [.semantic(
+            .rootKey("dwindle-default-split-ratio"),
+            "dwindle-default-split-ratio must be between 0.1 and 1.9 (got \(config.dwindleDefaultSplitRatio))",
+        )]
+        // Reset to default if invalid
+        config.dwindleDefaultSplitRatio = 1.0
+    }
+
+    // Validate master-default-percent
+    if config.masterDefaultPercent < 0.1 || config.masterDefaultPercent > 0.9 {
+        errors += [.semantic(
+            .rootKey("master-default-percent"),
+            "master-default-percent must be between 0.1 and 0.9 (got \(config.masterDefaultPercent))",
+        )]
+        // Reset to default if invalid
+        config.masterDefaultPercent = 0.5
+    }
+
+    // Validate mouse-sensitivity
+    if config.mouseSensitivity < 0.1 || config.mouseSensitivity > 3.0 {
+        errors += [.semantic(
+            .rootKey("mouse-sensitivity"),
+            "mouse-sensitivity must be between 0.1 and 3.0 (got \(config.mouseSensitivity))",
+        )]
+        // Reset to default if invalid
+        config.mouseSensitivity = 1.0
     }
 
     if config.enableNormalizationFlattenContainers {
@@ -344,6 +390,49 @@ extension Parsed where Failure == String {
 
 func parseBool(_ raw: TOMLValueConvertible, _ backtrace: TomlBacktrace) -> ParsedToml<Bool> {
     raw.bool.orFailure(expectedActualTypeError(expected: .bool, actual: raw.type, backtrace))
+}
+
+func parseCGFloat(_ raw: TOMLValueConvertible, _ backtrace: TomlBacktrace) -> ParsedToml<CGFloat> {
+    // TOML supports both int and float, so we should accept both
+    if let intValue = raw.int {
+        return .success(CGFloat(intValue))
+    } else if let doubleValue = raw.double {
+        return .success(CGFloat(doubleValue))
+    } else {
+        return .failure(.semantic(backtrace, "Expected number (int or float), got \(raw.type)"))
+    }
+}
+
+func parseCGPoint(_ raw: TOMLValueConvertible, _ backtrace: TomlBacktrace) -> ParsedToml<CGPoint> {
+    guard let array = raw.array else {
+        return .failure(expectedActualTypeError(expected: .array, actual: raw.type, backtrace))
+    }
+
+    guard array.count == 2 else {
+        return .failure(.semantic(backtrace, "Expected array with exactly 2 elements [x, y], got \(array.count) elements"))
+    }
+
+    // Parse x value (can be int or float)
+    let x: CGFloat
+    if let intValue = array[0].int {
+        x = CGFloat(intValue)
+    } else if let doubleValue = array[0].double {
+        x = CGFloat(doubleValue)
+    } else {
+        return .failure(.semantic(backtrace + .index(0), "Expected number, got \(array[0].type)"))
+    }
+
+    // Parse y value (can be int or float)
+    let y: CGFloat
+    if let intValue = array[1].int {
+        y = CGFloat(intValue)
+    } else if let doubleValue = array[1].double {
+        y = CGFloat(doubleValue)
+    } else {
+        return .failure(.semantic(backtrace + .index(1), "Expected number, got \(array[1].type)"))
+    }
+
+    return .success(CGPoint(x: x, y: y))
 }
 
 indirect enum TomlBacktrace: CustomStringConvertible, Equatable {

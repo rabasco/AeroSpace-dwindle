@@ -49,6 +49,7 @@ let package = Package(
                 .target(name: "Common"),
                 .target(name: "PrivateApi"),
             ],
+            exclude: ["layout/dwindle/README.md"],
             swiftSettings: [
                 .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
             ],

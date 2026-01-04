@@ -14,6 +14,19 @@ struct ExperimentalUISettings {
             UserDefaults.standard.synchronize()
         }
     }
+
+    var showMenuBarWorkspaces: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: ExperimentalUISettingsItems.showMenuBarWorkspaces.rawValue) == nil {
+                return true // Default to showing workspace indicators
+            }
+            return UserDefaults.standard.bool(forKey: ExperimentalUISettingsItems.showMenuBarWorkspaces.rawValue)
+        }
+        set {
+            UserDefaults.standard.setValue(newValue, forKey: ExperimentalUISettingsItems.showMenuBarWorkspaces.rawValue)
+            UserDefaults.standard.synchronize()
+        }
+    }
 }
 
 enum MenuBarStyle: String, CaseIterable, Identifiable, Equatable, Hashable {
@@ -36,18 +49,124 @@ enum MenuBarStyle: String, CaseIterable, Identifiable, Equatable, Hashable {
 
 enum ExperimentalUISettingsItems: String {
     case displayStyle
+    case showMenuBarWorkspaces
 }
 
 @MainActor
 func getExperimentalUISettingsMenu(viewModel: TrayMenuModel) -> some View {
-    let color = AppearanceTheme.current == .dark ? Color.white : Color.black
-    return Menu {
-        Text("Menu bar style (macOS 14 or later):")
-        ForEach(MenuBarStyle.allCases, id: \.id) { style in
-            MenuBarStyleButton(style: style, color: color).environmentObject(viewModel)
+    ExperimentalUISettingsMenu(viewModel: viewModel)
+}
+
+@MainActor
+struct ExperimentalUISettingsMenu: View {
+    @ObservedObject var viewModel: TrayMenuModel
+
+    var body: some View {
+        let color = AppearanceTheme.current == .dark ? Color.white : Color.black
+        return Menu {
+            Toggle(isOn: Binding(
+                get: { viewModel.experimentalUISettings.showMenuBarWorkspaces },
+                set: { newValue in
+                    viewModel.experimentalUISettings.showMenuBarWorkspaces = newValue
+                },
+            )) {
+                Text("Show workspace indicators in menu bar")
+            }
+
+            if viewModel.experimentalUISettings.showMenuBarWorkspaces {
+                Text("Menu bar style (macOS 14 or later):")
+                ForEach(MenuBarStyle.allCases, id: \.id) { style in
+                    MenuBarStyleButton(style: style, color: color).environmentObject(viewModel)
+                }
+            }
+
+            // CENTERED BAR FEATURE
+            Divider()
+            Text("Centered Workspace Bar:")
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarEnabled },
+                set: { viewModel.centeredBarEnabled = $0 },
+            )) {
+                Text("Enable centered workspace bar")
+            }
+
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarShowNumbers },
+                set: { viewModel.centeredBarShowNumbers = $0 },
+            )) {
+                Text("Show workspace numbers")
+            }
+            .disabled(!viewModel.centeredBarEnabled)
+
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarShowModeIndicator },
+                set: { viewModel.centeredBarShowModeIndicator = $0 },
+            )) {
+                Text("Show mode indicator in centered bar")
+            }
+            .disabled(!viewModel.centeredBarEnabled)
+
+            // Window level selection
+            Text("Window Level (Z-Index):")
+            ForEach(CenteredBarWindowLevel.allCases) { level in
+                Toggle(isOn: Binding(
+                    get: { viewModel.centeredBarWindowLevel == level },
+                    set: { isOn in
+                        guard isOn else { return }
+                        viewModel.centeredBarWindowLevel = level
+                    },
+                )) {
+                    Text(level.title)
+                }
+                .disabled(!viewModel.centeredBarEnabled)
+            }
+
+            // Bar position selection
+            Text("Bar Position:")
+            ForEach(CenteredBarPosition.allCases) { position in
+                Toggle(isOn: Binding(
+                    get: { viewModel.centeredBarPosition == position },
+                    set: { isOn in
+                        guard isOn else { return }
+                        viewModel.centeredBarPosition = position
+                    },
+                )) {
+                    Text(position.title)
+                }
+                .disabled(!viewModel.centeredBarEnabled)
+            }
+
+            Divider()
+
+            // Notch-aware positioning
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarNotchAware },
+                set: { viewModel.centeredBarNotchAware = $0 },
+            )) {
+                Text("Notch-aware positioning (shift right of notch)")
+            }
+            .disabled(!viewModel.centeredBarEnabled)
+
+            // Deduplicate app icons
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarDeduplicateIcons },
+                set: { viewModel.centeredBarDeduplicateIcons = $0 },
+            )) {
+                Text("Deduplicate app icons (show badge with count)")
+            }
+            .disabled(!viewModel.centeredBarEnabled)
+
+            // Hide empty workspaces
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarHideEmptyWorkspaces },
+                set: { viewModel.centeredBarHideEmptyWorkspaces = $0 },
+            )) {
+                Text("Hide empty workspaces")
+            }
+            .disabled(!viewModel.centeredBarEnabled)
+        } label: {
+            Text("Experimental UI Settings (No stability guarantees)")
         }
-    } label: {
-        Text("Experimental UI Settings (No stability guarantees)")
     }
 }
 

@@ -17,7 +17,7 @@ done
 #############
 
 ./build-docs.sh
-./build-shell-completion.sh
+#./build-shell-completion.sh
 
 ./generate.sh
 ./script/check-uncommitted-files.sh
