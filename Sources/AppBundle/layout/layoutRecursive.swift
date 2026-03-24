@@ -293,10 +293,7 @@ extension TilingContainer {
 
         // Get window widths (custom if resized, otherwise default 80%)
         let windowWidths: [CGFloat] = children.map { child in
-            if let virtualRect = child.lastAppliedLayoutVirtualRect {
-                return virtualRect.width
-            }
-            return defaultWindowWidth
+            child.lastAppliedLayoutVirtualRect == nil ? defaultWindowWidth : child.getWeight(.h)
         }
 
         // Calculate positions:

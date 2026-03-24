@@ -73,6 +73,11 @@ struct LayoutCommand: Command {
             // Scroll layout requires horizontal orientation
             if targetLayout == .scroll {
                 targetOrientation = .h
+                
+                // Invalidate lastAppliedLayoutVirtualRect
+                parent.children.forEach { node in
+                    node.lastAppliedLayoutVirtualRect = nil
+                }
             }
 
             // Invalidate dwindle cache when switching away from dwindle layout
