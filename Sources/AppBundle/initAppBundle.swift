@@ -43,6 +43,7 @@ private func smartLayoutAtStartup() {
     let workspace = focus.workspace
     let root = workspace.rootTilingContainer
 
+    workspace.rootTilingContainer.children.first?.markAsMostRecentChild()
     if root.layout == config.defaultRootContainerLayout {
         return
     }

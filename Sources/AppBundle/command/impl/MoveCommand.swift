@@ -26,6 +26,9 @@ struct MoveCommand: Command {
                             return true
                     }
                 } else {
+                    guard currentWindow.nodeWorkspace?.rootTilingContainer.layout != .scroll else {
+                        return false
+                    }
                     return moveOut(window: currentWindow, direction: direction, io, args, env)
                 }
             case .workspace: // floating window

@@ -48,6 +48,8 @@ extension TreeNode {
                         try await container.layoutTiles(point, width: width, height: height, virtual: virtual, context)
                     case .accordion:
                         try await container.layoutAccordion(point, width: width, height: height, virtual: virtual, context)
+                    case .scroll:
+                        try await container.layoutScroll(point, width: width, height: height, virtual: virtual, context)
                 }
             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
                  .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
@@ -170,6 +172,49 @@ extension TilingContainer {
                         virtual: virtual,
                         context,
                     )
+            }
+        }
+    }
+
+    @MainActor
+    fileprivate func layoutScroll(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
+        guard let mru = mostRecentChild else { return }
+
+        let mruIndex: Int = children.firstIndex(of: mru) ?? 0
+
+        if children.count == 1, let child = children.first {
+            try await child.layoutRecursive(point, width: width, height: height, virtual: virtual, context)
+        } else {
+            let gap = 10.0
+            let screenWidth = width + (point.x * 2)
+            let windowWidth = screenWidth * 0.8 // 80%
+            let sideGap = screenWidth * 0.1 // 10%
+
+            // Set weights
+            children.forEach {
+                if $0.hWeight <= 1 {
+                    $0.setWeight(.h, windowWidth)
+                }
+            }
+
+            var positions: [CGFloat] = []
+
+            for i in 0 ..< children.count {
+                if i == 0 {
+                    positions.append(CGFloat(sideGap - gap))
+                } else {
+                    let newValue = positions[i - 1] + children[i - 1].hWeight + gap
+                    positions.append(newValue)
+                }
+            }
+
+            let anchor = positions[mruIndex] - sideGap
+
+            let finalPositions = positions.map { $0 - anchor }
+
+            for (i, child) in children.enumerated() {
+                try await child
+                    .layoutRecursive(CGPoint(x: finalPositions[i], y: point.y), width: child.hWeight, height: child.vWeight, virtual: virtual, context)
             }
         }
     }

@@ -301,6 +301,8 @@ extension TreeNode {
                             : .v_accordion(container.children.map(\.layoutDescription))
                     case .dwindle:
                         .dwindle(container.children.map(\.layoutDescription))
+                    case .scroll:
+                        .scroll(container.children.map(\.layoutDescription))
                 }
         }
     }
@@ -313,6 +315,7 @@ enum LayoutDescription: Equatable {
     case h_accordion([LayoutDescription])
     case v_accordion([LayoutDescription])
     case dwindle([LayoutDescription])
+    case scroll([LayoutDescription])
     case window(UInt32)
     case macosPopupWindowsContainer
     case macosMinimized

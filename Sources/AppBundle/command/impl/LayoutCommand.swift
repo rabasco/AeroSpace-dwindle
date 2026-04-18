@@ -32,6 +32,8 @@ struct LayoutCommand: Command {
                     return try await relayoutAllWindows(window: window)
                 }
                 return false
+            case .scroll:
+                return changeTilingLayoutScroll(io, window: window)
             case .horizontal:
                 return changeTilingLayout(io, targetLayout: nil, targetOrientation: .h, window: window)
             case .vertical:
@@ -80,6 +82,7 @@ extension Window {
             case .accordion:   (parent as? TilingContainer)?.layout == .accordion
             case .tiles:       (parent as? TilingContainer)?.layout == .tiles
             case .dwindle:     (parent as? TilingContainer)?.layout == .dwindle
+            case .scroll:      (parent as? TilingContainer)?.layout == .scroll
             case .horizontal:  (parent as? TilingContainer)?.orientation == .h
             case .vertical:    (parent as? TilingContainer)?.orientation == .v
             case .h_accordion: (parent as? TilingContainer).map { $0.layout == .accordion && $0.orientation == .h } == true
@@ -109,5 +112,13 @@ extension LayoutCommand {
             try await element.relayoutWindow(on: workspace, forceTile: false)
         }
         return true
+    }
+
+    @MainActor func changeTilingLayoutScroll(_ io: CmdIo, window: Window) -> Bool {
+        if changeTilingLayout(io, targetLayout: .scroll, targetOrientation: .h, window: window) {
+            window.nodeWorkspace?.allLeafWindowsRecursive.forEach { $0.setWeight(.h, WEIGHT_AUTO) }
+            return true
+        }
+        return false
     }
 }

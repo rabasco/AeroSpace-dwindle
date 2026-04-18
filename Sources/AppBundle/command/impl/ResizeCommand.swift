@@ -11,7 +11,8 @@ struct ResizeCommand: Command { // todo cover with tests
         let candidates = target.windowOrNil?.parentsWithSelf
             .filter {
                 ($0.parent as? TilingContainer)?.layout == .tiles ||
-                    ($0.parent as? TilingContainer)?.layout == .dwindle
+                    ($0.parent as? TilingContainer)?.layout == .dwindle ||
+                    ($0.parent as? TilingContainer)?.layout == .scroll
             }
             ?? []
 
@@ -43,6 +44,11 @@ struct ResizeCommand: Command { // todo cover with tests
             case .set(let unit): CGFloat(unit) - node.getWeight(orientation)
             case .add(let unit): CGFloat(unit)
             case .subtract(let unit): -CGFloat(unit)
+        }
+
+        if (target.windowOrNil?.parent as? TilingContainer)?.layout == .scroll {
+            node.setWeight(orientation, node.getWeight(orientation) + diff)
+            return true
         }
 
         guard let childDiff = diff.div(parent.children.count - 1) else { return false }
