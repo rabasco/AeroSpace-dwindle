@@ -44,6 +44,8 @@ extension TreeNode {
                 switch container.layout {
                     case .tiles:
                         try await container.layoutTiles(point, width: width, height: height, virtual: virtual, context)
+                    case .dwindle:
+                        try await container.layoutTiles(point, width: width, height: height, virtual: virtual, context)
                     case .accordion:
                         try await container.layoutAccordion(point, width: width, height: height, virtual: virtual, context)
                 }
