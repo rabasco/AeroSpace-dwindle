@@ -13,6 +13,7 @@ struct LayoutCommand: Command {
         let targetDescription = args.toggleBetween.val.first(where: { !window.matchesDescription($0) })
             ?? args.toggleBetween.val.first.orDie()
         if window.matchesDescription(targetDescription) { return .fail }
+        bindWindowsToRootLayoutIfLayoutIsDwindle(window: window)
         switch targetDescription {
             case .h_accordion:
                 return changeTilingLayout(io, targetLayout: .accordion, targetOrientation: .h, window: window)
@@ -26,6 +27,12 @@ struct LayoutCommand: Command {
                 return changeTilingLayout(io, targetLayout: .accordion, targetOrientation: nil, window: window)
             case .tiles:
                 return changeTilingLayout(io, targetLayout: .tiles, targetOrientation: nil, window: window)
+            case .dwindle:
+                if changeTilingLayout(io, targetLayout: .dwindle, targetOrientation: nil, window: window) == .succ {
+                    try await relayoutAllWindows(window: window)
+                    return .succ
+                }
+                return .fail
             case .horizontal:
                 return changeTilingLayout(io, targetLayout: nil, targetOrientation: .h, window: window)
             case .vertical:
@@ -73,6 +80,7 @@ extension Window {
         return switch layout {
             case .accordion:   (parent as? TilingContainer)?.layout == .accordion
             case .tiles:       (parent as? TilingContainer)?.layout == .tiles
+            case .dwindle:     (parent as? TilingContainer)?.layout == .dwindle
             case .horizontal:  (parent as? TilingContainer)?.orientation == .h
             case .vertical:    (parent as? TilingContainer)?.orientation == .v
             case .h_accordion: (parent as? TilingContainer).map { $0.layout == .accordion && $0.orientation == .h } == true
@@ -81,6 +89,25 @@ extension Window {
             case .v_tiles:     (parent as? TilingContainer).map { $0.layout == .tiles && $0.orientation == .v } == true
             case .tiling:      parent is TilingContainer
             case .floating:    parent is Workspace
+        }
+    }
+}
+
+extension LayoutCommand {
+    @MainActor func bindWindowsToRootLayoutIfLayoutIsDwindle(window: Window) {
+        if let rootTilingContainer = window.nodeWorkspace?.rootTilingContainer, rootTilingContainer.layout == .dwindle {
+            let allWindows = window.nodeWorkspace?.allLeafWindowsRecursive
+            allWindows?.forEach { $0.unbindFromParent() }
+            allWindows?.forEach { $0.bind(to: rootTilingContainer, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST) }
+        }
+    }
+
+    @MainActor func relayoutAllWindows(window: Window) async throws {
+        guard let workspace = window.nodeWorkspace else { return }
+        let allWindows = workspace.allLeafWindowsRecursive
+        allWindows.forEach { $0.unbindFromParent() }
+        for element in allWindows {
+            try await element.relayoutWindow(on: workspace, forceTile: false)
         }
     }
 }

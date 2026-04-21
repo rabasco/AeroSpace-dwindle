@@ -222,7 +222,14 @@ private func unbindAndGetBindingDataForNewWindow(_ windowId: UInt32, _ macApp: M
 // The function is private because it's unsafe. It leaves the window in unbound state
 @MainActor
 private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: Window?) -> BindingData {
-    window?.unbindFromParent() // It's important to unbind to get correct data from below
+    if window?.parent != nil {
+        window?.unbindFromParent() // It's important to unbind to get correct data from below
+    }
+
+    if workspace.rootTilingContainer.layout == .dwindle {
+        return unbindAndGetBindingDataForNewTilingWindowForDwindleLayout(workspace, window: window)
+    }
+
     let mruWindow = workspace.mostRecentWindowRecursive
     if let mruWindow, let tilingParent = mruWindow.parent as? TilingContainer {
         return BindingData(
@@ -237,6 +244,62 @@ private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, w
             index: INDEX_BIND_LAST,
         )
     }
+}
+
+@MainActor
+func unbindAndGetBindingDataForNewTilingWindowForDwindleLayout(_ workspace: Workspace, window: Window?) -> BindingData {
+    let rootTilingContainer = workspace.rootTilingContainer
+
+    if rootTilingContainer.children.isEmpty {
+        return BindingData(
+            parent: workspace.rootTilingContainer,
+            adaptiveWeight: WEIGHT_AUTO,
+            index: INDEX_BIND_LAST,
+        )
+    } else {
+        if let mru = workspace.mostRecentWindowRecursive {
+            if let parentContainer = mru.parent as? TilingContainer {
+                if parentContainer.children.count == 1 {
+                    return BindingData(
+                        parent: parentContainer,
+                        adaptiveWeight: WEIGHT_AUTO,
+                        index: INDEX_BIND_LAST,
+                    )
+                }
+
+                if parentContainer.children.count == 2, let indexOfMru = parentContainer.children.firstIndex(of: mru) {
+
+                    mru.unbindFromParent()
+
+                    let newContainer = TilingContainer(
+                        parent: parentContainer,
+                        adaptiveWeight: WEIGHT_AUTO,
+                        parentContainer.orientation.opposite,
+                        parentContainer.layout,
+                        index: indexOfMru == 0 ? 0 : INDEX_BIND_LAST,
+                    )
+
+                    mru.bind(
+                        to: newContainer,
+                        adaptiveWeight: WEIGHT_AUTO,
+                        index: INDEX_BIND_LAST,
+                    )
+
+                    return BindingData(
+                        parent: newContainer,
+                        adaptiveWeight: WEIGHT_AUTO,
+                        index: INDEX_BIND_LAST,
+                    )
+                }
+            }
+        }
+    }
+
+    return BindingData(
+        parent: workspace.rootTilingContainer,
+        adaptiveWeight: WEIGHT_AUTO,
+        index: INDEX_BIND_LAST,
+    )
 }
 
 @MainActor

@@ -110,6 +110,13 @@ private let moveOutMacosUnconventionalWindow = "moving macOS fullscreen, minimiz
         case .tilingContainer(let parent):
             check(parent.orientation == direction.orientation)
             guard let ownIndex = innerMostChild.ownIndex else { return .fail }
+            if parent.layout == .dwindle {
+                let otherWindow = parent.children.first(where: { $0 is Window })
+                let indexOfWindow = innerMostChild.children.firstIndex(of: window) ?? 0
+                otherWindow?.bind(to: innerMostChild, adaptiveWeight: WEIGHT_AUTO, index: indexOfWindow)
+                window.bind(to: parent, adaptiveWeight: WEIGHT_AUTO, index: 0)
+                return .succ
+            }
             window.bind(to: parent, adaptiveWeight: WEIGHT_AUTO, index: ownIndex + direction.insertionOffset)
             return .succ
         case .workspace(let parent):
@@ -142,6 +149,14 @@ private let moveOutMacosUnconventionalWindow = "moving macOS fullscreen, minimiz
             window.bind(to: deepTarget, adaptiveWeight: WEIGHT_AUTO, index: 0)
         case .window(let deepTarget):
             guard let parent = deepTarget.parent as? TilingContainer else { return .fail }
+            if parent.layout == .dwindle {
+                let deepTargetIndex = deepTarget.ownIndex.orDie()
+                let windowsIndex = window.ownIndex.orDie()
+                let windowParent = window.parent.orDie()
+                window.bind(to: parent, adaptiveWeight: WEIGHT_AUTO, index: deepTargetIndex)
+                deepTarget.bind(to: windowParent, adaptiveWeight: WEIGHT_AUTO, index: windowsIndex)
+                return .succ
+            }
             window.bind(
                 to: parent,
                 adaptiveWeight: WEIGHT_AUTO,
